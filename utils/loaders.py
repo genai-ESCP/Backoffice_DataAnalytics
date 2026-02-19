@@ -132,7 +132,7 @@ def parse_extraction_date_from_filename(name: str, course_code: str = "") -> Opt
 
     mon_map = {
         "jan":1, "janv":1, "janvier":1, "january":1,
-        "fev":2, "fév":2, "fevr":2, "février":2, "fevrier":2, "feb":2, "february":2,
+        "fev":2, "fév":2, "fevr":2, "février":2, "fevrier":2,"Fevrier":2, "feb":2, "february":2,
         "mar":3, "mars":3, "march":3,
         "avr":4, "avril":4, "apr":4, "april":4,
         "mai":5, "may":5,
