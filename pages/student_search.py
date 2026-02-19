@@ -11,17 +11,27 @@ from utils.loaders import (
 )
 from utils.ui import apply_dashboard_style, card, divider, render_sidebar
 
-COURSE_MAIN = "2526ALL_OL_GENAI_00"
-COURSE_RETAKE = "2526ALL_OL_GENAI_02"
-COURSE_OLD = "2425ALL_OL_GENAI_00"
+COURSE_2425 = "2425ALL_OL_GENAI_00"
+COURSE_2526_FALL_NEW = "2526ALL_OL_GENAI_00"
+COURSE_2526_FALL_RETAKE = "2526ALL_OL_GENAI_02"
+COURSE_2526_SPRING_NEW = "2526ALL_SPR_GENAI_00"
+COURSE_2526_SPRING_RETAKE = "2526ALL_SPR_GENAI_02"
 COURSE_POC = "poc_students"
 
 COURSE_LABELS = {
-    COURSE_MAIN: "Fall 2526 course",
-    COURSE_RETAKE: "Retake Fall 2526",
-    COURSE_OLD: "Spring 2425",
+    COURSE_2425: "Spring 2425",
+    COURSE_2526_FALL_NEW: "Fall 2526 new students",
+    COURSE_2526_FALL_RETAKE: "Fall 2526 retake",
+    COURSE_2526_SPRING_NEW: "Spring 2526 new students",
+    COURSE_2526_SPRING_RETAKE: "Spring 2526 retake",
 }
-COURSE_ORDER = [COURSE_MAIN, COURSE_RETAKE, COURSE_OLD]
+COURSE_ORDER = [
+    COURSE_2425,
+    COURSE_2526_FALL_NEW,
+    COURSE_2526_FALL_RETAKE,
+    COURSE_2526_SPRING_NEW,
+    COURSE_2526_SPRING_RETAKE,
+]
 
 st.set_page_config(page_title="Student search", page_icon="S", layout="wide", initial_sidebar_state="expanded")
 apply_dashboard_style()
@@ -239,9 +249,9 @@ membership = {code: in_latest_snapshot(code) for code in COURSE_ORDER}
 active_course_labels = [COURSE_LABELS[c] for c in COURSE_ORDER if membership[c]]
 
 verdicts_old = []
-old_dt = latest_by_course.get(COURSE_OLD)
+old_dt = latest_by_course.get(COURSE_2425)
 if old_dt is not None and pd.notna(old_dt):
-    rows_old = m[(m["course_type"] == COURSE_OLD) & (m["extracted_at"] == old_dt)]
+    rows_old = m[(m["course_type"] == COURSE_2425) & (m["extracted_at"] == old_dt)]
     verdicts_old = rows_old["verdict"].fillna("").tolist()
 
 passed_old = any("PASS" in str(v).upper() for v in verdicts_old if v)
@@ -265,12 +275,16 @@ def latest_verdict_for_course(course_code: str) -> str:
 
 latest_verdict_by_course = {code: latest_verdict_for_course(code) for code in COURSE_ORDER}
 completed_genai = any(v == "Passed" for v in latest_verdict_by_course.values())
-only_failed_main = (
-    latest_verdict_by_course.get(COURSE_MAIN) == "Failed"
-    and not membership.get(COURSE_RETAKE, False)
-    and not membership.get(COURSE_OLD, False)
+in_retake_track = membership.get(COURSE_2526_FALL_RETAKE, False) or membership.get(COURSE_2526_SPRING_RETAKE, False)
+failed_new_students_track = (
+    latest_verdict_by_course.get(COURSE_2526_FALL_NEW) == "Failed"
+    or latest_verdict_by_course.get(COURSE_2526_SPRING_NEW) == "Failed"
 )
-retake_not_completed = membership.get(COURSE_RETAKE, False) and latest_verdict_by_course.get(COURSE_RETAKE) != "Passed"
+only_failed_new_students = failed_new_students_track and not in_retake_track
+retake_not_completed = (
+    (membership.get(COURSE_2526_FALL_RETAKE, False) and latest_verdict_by_course.get(COURSE_2526_FALL_RETAKE) != "Passed")
+    or (membership.get(COURSE_2526_SPRING_RETAKE, False) and latest_verdict_by_course.get(COURSE_2526_SPRING_RETAKE) != "Passed")
+)
 is_poc_student = m["course_type"].astype(str).str.strip().str.lower().eq(COURSE_POC.lower()).any()
 
 if is_poc_student:
@@ -279,26 +293,34 @@ elif completed_genai:
     st.success("Completed the GenAI course")
 elif retake_not_completed:
     st.error("Failed to complete the GenAI course in retake. Student cannot redo it again.")
-elif only_failed_main:
+elif only_failed_new_students:
     st.info("In progress: failed the new students course and currently not enrolled in another track.")
 
 conflicts = []
-if membership[COURSE_MAIN] and membership[COURSE_RETAKE]:
-    conflicts.append(f"Student in both {COURSE_LABELS[COURSE_MAIN]} and {COURSE_LABELS[COURSE_RETAKE]}")
-if membership[COURSE_RETAKE] and passed_old:
-    conflicts.append(f"In {COURSE_LABELS[COURSE_RETAKE]} but passed {COURSE_LABELS[COURSE_OLD]}")
-if membership[COURSE_MAIN] and failed_old:
-    conflicts.append(f"In {COURSE_LABELS[COURSE_MAIN]} but failed {COURSE_LABELS[COURSE_OLD]}")
+if membership[COURSE_2526_FALL_NEW] and membership[COURSE_2526_FALL_RETAKE]:
+    conflicts.append(f"Student in both {COURSE_LABELS[COURSE_2526_FALL_NEW]} and {COURSE_LABELS[COURSE_2526_FALL_RETAKE]}")
+if membership[COURSE_2526_SPRING_NEW] and membership[COURSE_2526_SPRING_RETAKE]:
+    conflicts.append(f"Student in both {COURSE_LABELS[COURSE_2526_SPRING_NEW]} and {COURSE_LABELS[COURSE_2526_SPRING_RETAKE]}")
+if in_retake_track and passed_old:
+    conflicts.append(f"In retake track but passed {COURSE_LABELS[COURSE_2425]}")
+if (membership[COURSE_2526_FALL_NEW] or membership[COURSE_2526_SPRING_NEW]) and failed_old:
+    conflicts.append(f"In new students track but failed {COURSE_LABELS[COURSE_2425]}")
 
 situation = "Needs review"
 if passed_old:
-    situation = f"Passed ({COURSE_LABELS[COURSE_OLD]})"
+    situation = f"Passed ({COURSE_LABELS[COURSE_2425]})"
 elif failed_old:
-    situation = f"Retake required ({COURSE_LABELS[COURSE_RETAKE]})"
-elif membership[COURSE_MAIN]:
-    situation = f"In progress ({COURSE_LABELS[COURSE_MAIN]})"
-elif membership[COURSE_RETAKE]:
-    situation = f"In progress ({COURSE_LABELS[COURSE_RETAKE]})"
+    situation = f"Retake required ({COURSE_LABELS[COURSE_2526_SPRING_RETAKE]})"
+elif membership[COURSE_2526_SPRING_RETAKE]:
+    situation = f"In progress ({COURSE_LABELS[COURSE_2526_SPRING_RETAKE]})"
+elif membership[COURSE_2526_SPRING_NEW]:
+    situation = f"In progress ({COURSE_LABELS[COURSE_2526_SPRING_NEW]})"
+elif membership[COURSE_2526_FALL_RETAKE]:
+    situation = f"In progress ({COURSE_LABELS[COURSE_2526_FALL_RETAKE]})"
+elif membership[COURSE_2526_FALL_NEW]:
+    situation = f"In progress ({COURSE_LABELS[COURSE_2526_FALL_NEW]})"
+elif membership[COURSE_2425]:
+    situation = f"In progress ({COURSE_LABELS[COURSE_2425]})"
 if conflicts:
     situation = "Needs review"
 
@@ -333,7 +355,7 @@ with left:
         card("Needs review", f"<div class='small-muted'>{' | '.join(conflicts)}</div>", muted=True)
 
 with right:
-    cols = st.columns(3, gap="large")
+    cols = st.columns(len(COURSE_ORDER), gap="large")
     for idx, course_code in enumerate(COURSE_ORDER):
         with cols[idx]:
             verdict = latest_verdict_by_course[course_code]

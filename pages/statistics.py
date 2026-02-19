@@ -5,15 +5,27 @@ from utils.auth import require_auth
 from utils.loaders import load_all_extractions, load_certified_emails, normalize_email
 from utils.ui import apply_dashboard_style, card, kpi, divider, render_sidebar
 
-COURSE_MAIN = "2526ALL_OL_GENAI_00"
-COURSE_RETAKE = "2526ALL_OL_GENAI_02"
-COURSE_OLD = "2425ALL_OL_GENAI_00"
+COURSE_2425 = "2425ALL_OL_GENAI_00"
+COURSE_2526_FALL_NEW = "2526ALL_OL_GENAI_00"
+COURSE_2526_FALL_RETAKE = "2526ALL_OL_GENAI_02"
+COURSE_2526_SPRING_NEW = "2526ALL_SPR_GENAI_00"
+COURSE_2526_SPRING_RETAKE = "2526ALL_SPR_GENAI_02"
 COURSE_POC = "Poc_Students"
 
+TRACKED_COURSES = [
+    COURSE_2425,
+    COURSE_2526_FALL_NEW,
+    COURSE_2526_FALL_RETAKE,
+    COURSE_2526_SPRING_NEW,
+    COURSE_2526_SPRING_RETAKE,
+]
+
 COURSE_LABELS = {
-    COURSE_MAIN: "Fall 2526",
-    COURSE_RETAKE: "Retake Fall 2526",
-    COURSE_OLD: "Spring 2425",
+    COURSE_2425: "Spring 2425",
+    COURSE_2526_FALL_NEW: "Fall 2526 new students",
+    COURSE_2526_FALL_RETAKE: "Fall 2526 retake",
+    COURSE_2526_SPRING_NEW: "Spring 2526 new students",
+    COURSE_2526_SPRING_RETAKE: "Spring 2526 retake",
     COURSE_POC: "POC students",
 }
 
@@ -89,15 +101,14 @@ card(
     muted=True,
 )
 
-k1, k2, k3, k4 = st.columns(4, gap="large")
-with k1:
-    kpi(f"{COURSE_MAIN} (latest)", str(int((latest_df["course_type"] == COURSE_MAIN).sum())))
-with k2:
-    kpi(f"{COURSE_RETAKE} (latest)", str(int((latest_df["course_type"] == COURSE_RETAKE).sum())))
-with k3:
-    kpi(f"{COURSE_OLD} (latest)", str(int((latest_df["course_type"] == COURSE_OLD).sum())))
-with k4:
-    kpi(f"{COURSE_POC} (latest)", str(int((latest_df["course_type"] == COURSE_POC).sum())))
+latest_kpi_courses = TRACKED_COURSES + [COURSE_POC]
+kpi_cols = st.columns(min(3, len(latest_kpi_courses)), gap="large")
+for idx, course_code in enumerate(latest_kpi_courses):
+    with kpi_cols[idx % len(kpi_cols)]:
+        kpi(
+            f"{COURSE_LABELS.get(course_code, course_code)} (latest)",
+            str(int((latest_df["course_type"] == course_code).sum())),
+        )
 
 divider()
 
@@ -229,9 +240,9 @@ if pass_counts:
 divider()
 
 # Verdict distribution (latest old)
-old_latest_dt = latest_by_course.get(COURSE_OLD)
+old_latest_dt = latest_by_course.get(COURSE_2425)
 if old_latest_dt is not None and pd.notna(old_latest_dt):
-    old_latest = df[(df["course_type"] == COURSE_OLD) & (df["extracted_at"] == old_latest_dt)]
+    old_latest = df[(df["course_type"] == COURSE_2425) & (df["extracted_at"] == old_latest_dt)]
     verdict_counts = old_latest["verdict"].fillna("").replace("", "Unknown").value_counts()
     card("Verdict distribution (latest OLD)", "<div class='small-muted'>Passed / Failed / Unknown</div>", muted=True)
     st.bar_chart(verdict_counts)

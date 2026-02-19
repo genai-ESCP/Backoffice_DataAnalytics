@@ -10,8 +10,23 @@ from openpyxl.utils import get_column_letter
 from utils.auth import require_auth
 from utils.ui import apply_dashboard_style, card, render_sidebar
 
-DEFAULT_SEJI_SHEET = "gc_2526ALL_OL_GENAI_00_fullgc_2"
-DEFAULT_OUTPUT_XLSX = "Data_GenAI_in_Business_and_in_my_Studies_NewStudents.xlsx"
+COURSE_2425 = "2425ALL_OL_GENAI_00"
+COURSE_2526_FALL_NEW = "2526ALL_OL_GENAI_00"
+COURSE_2526_FALL_RETAKE = "2526ALL_OL_GENAI_02"
+COURSE_2526_SPRING_NEW = "2526ALL_SPR_GENAI_00"
+COURSE_2526_SPRING_RETAKE = "2526ALL_SPR_GENAI_02"
+
+COURSE_PRESETS = [
+    COURSE_2425,
+    COURSE_2526_FALL_NEW,
+    COURSE_2526_FALL_RETAKE,
+    COURSE_2526_SPRING_NEW,
+    COURSE_2526_SPRING_RETAKE,
+]
+
+DEFAULT_COURSE_PRESET = COURSE_2526_SPRING_NEW
+DEFAULT_SEJI_SHEET = f"gc_{DEFAULT_COURSE_PRESET}_fullgc_2"
+DEFAULT_OUTPUT_XLSX = "Data_GenAI_2526ALL_SPR_GENAI_00.xlsx"
 
 SEJI_LASTNAME_COL = "Last Name"
 SEJI_FIRSTNAME_COL = "First Name"
@@ -326,9 +341,14 @@ with col2:
 
 cfg1, cfg2 = st.columns([1, 1], gap="large")
 with cfg1:
-    seji_sheet = st.text_input("Target sheet name", value=DEFAULT_SEJI_SHEET)
+    selected_course_preset = st.selectbox(
+        "Course preset",
+        options=COURSE_PRESETS,
+        index=COURSE_PRESETS.index(DEFAULT_COURSE_PRESET),
+    )
+    seji_sheet = st.text_input("Target sheet name", value=f"gc_{selected_course_preset}_fullgc_2")
 with cfg2:
-    output_name = st.text_input("Output filename", value=DEFAULT_OUTPUT_XLSX)
+    output_name = st.text_input("Output filename", value=f"Data_GenAI_{selected_course_preset}.xlsx")
 
 if st.button("Process extraction", type="primary", use_container_width=True):
     if seji_file is None or hours_file is None:

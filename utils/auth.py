@@ -57,7 +57,7 @@ def require_auth() -> None:
         st.stop()
 
     with st.form("login_form", clear_on_submit=False):
-        username = st.text_input("Email", placeholder="genai@escp.eu")
+        username = st.text_input("Email", placeholder="JohnSmith@escp.eu")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Login", use_container_width=True)
 
