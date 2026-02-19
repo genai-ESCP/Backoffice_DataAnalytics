@@ -185,45 +185,60 @@ def _load_all_extractions_cached(_version: float) -> pd.DataFrame:
     for folder in course_folders:
         course_code = folder.name
         for path in sorted(folder.glob("*.xlsx")):
-            raw = pd.read_excel(path, sheet_name=0, header=None, dtype=str).fillna("")
-            header_idx = _detect_header_row(raw)
-            header_vals = [str(c).strip() for c in raw.iloc[header_idx].tolist()]
-            df = raw.iloc[header_idx + 1 :].copy()
-            df.columns = header_vals
-            df = df.loc[:, [c for c in df.columns if str(c).strip() != ""]]
-            df.columns = [str(c).strip() for c in df.columns]
+            try:
+                try:
+                    raw = pd.read_excel(path, sheet_name=0, header=None, dtype=str, engine="openpyxl").fillna("")
+                except Exception:
+                    try:
+                        raw = pd.read_excel(path, sheet_name=0, header=None, dtype=str).fillna("")
+                    except Exception:
+                        # Skip unreadable or malformed files instead of crashing the app.
+                        continue
 
-            c_email = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["email"])
-            c_id = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["student_id"])
-            c_fn = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["first_name"])
-            c_ln = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["last_name"])
-            c_hours = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["hours"])
-            c_grade = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["grade"])
-            c_verdict = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["verdict"])
+                if raw.empty:
+                    continue
 
-            extracted_at = parse_extraction_date_from_filename(path.name, course_code=course_code)
+                header_idx = _detect_header_row(raw)
+                header_vals = [str(c).strip() for c in raw.iloc[header_idx].tolist()]
+                df = raw.iloc[header_idx + 1 :].copy()
+                df.columns = header_vals
+                df = df.loc[:, [c for c in df.columns if str(c).strip() != ""]]
+                df.columns = [str(c).strip() for c in df.columns]
 
-            email_series = (
-                df[c_email].map(lambda v: normalize_email(str(v)))
-                if c_email
-                else df.apply(first_email_in_row, axis=1)
-            )
+                c_email = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["email"])
+                c_id = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["student_id"])
+                c_fn = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["first_name"])
+                c_ln = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["last_name"])
+                c_hours = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["hours"])
+                c_grade = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["grade"])
+                c_verdict = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["verdict"])
 
-            out = pd.DataFrame({
-                "course_type": course_code,
-                "file_name": path.name,
-                "extracted_at": extracted_at,
-                "email_norm": email_series,
-                "student_id": df[c_id].astype(str).str.strip() if c_id else "",
-                "first_name": df[c_fn].astype(str).str.strip() if c_fn else "",
-                "last_name": df[c_ln].astype(str).str.strip() if c_ln else "",
-                "hours": df[c_hours].astype(str).str.strip() if c_hours else "",
-                "grade": df[c_grade].astype(str).str.strip() if c_grade else "",
-                "verdict": df[c_verdict].astype(str).str.strip() if c_verdict else "",
-            })
+                extracted_at = parse_extraction_date_from_filename(path.name, course_code=course_code)
 
-            out = out[(out["email_norm"] != "") | (out["student_id"] != "")]
-            frames.append(out)
+                email_series = (
+                    df[c_email].map(lambda v: normalize_email(str(v)))
+                    if c_email
+                    else df.apply(first_email_in_row, axis=1)
+                )
+
+                out = pd.DataFrame({
+                    "course_type": course_code,
+                    "file_name": path.name,
+                    "extracted_at": extracted_at,
+                    "email_norm": email_series,
+                    "student_id": df[c_id].astype(str).str.strip() if c_id else "",
+                    "first_name": df[c_fn].astype(str).str.strip() if c_fn else "",
+                    "last_name": df[c_ln].astype(str).str.strip() if c_ln else "",
+                    "hours": df[c_hours].astype(str).str.strip() if c_hours else "",
+                    "grade": df[c_grade].astype(str).str.strip() if c_grade else "",
+                    "verdict": df[c_verdict].astype(str).str.strip() if c_verdict else "",
+                })
+
+                out = out[(out["email_norm"] != "") | (out["student_id"] != "")]
+                frames.append(out)
+            except Exception:
+                # Any unexpected parsing issue in a single file should not crash the full app.
+                continue
 
     if not frames:
         return pd.DataFrame(columns=[
