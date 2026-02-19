@@ -44,6 +44,43 @@ def _normalize_text(s: str) -> str:
     no_accents = "".join(ch for ch in raw if not unicodedata.combining(ch))
     return re.sub(r"[^a-z0-9]+", "", no_accents)
 
+
+def _detect_header_row(raw_df: pd.DataFrame, max_scan_rows: int = 30) -> int:
+    if raw_df.empty:
+        return 0
+
+    expected = {
+        "lastname",
+        "firstname",
+        "studentid",
+        "email",
+        "verdict",
+        "hoursincourse",
+        "overallgrade",
+    }
+
+    max_rows = min(max_scan_rows, len(raw_df))
+    best_idx = 0
+    best_score = -1
+
+    for i in range(max_rows):
+        vals = [str(v).strip() for v in raw_df.iloc[i].tolist()]
+        norm_vals = [_normalize_text(v) for v in vals if v and v.lower() != "nan"]
+        if not norm_vals:
+            continue
+
+        row_join = " ".join(norm_vals)
+        score = 0
+        for token in expected:
+            if token in row_join:
+                score += 1
+
+        if score > best_score:
+            best_score = score
+            best_idx = i
+
+    return best_idx
+
 def find_col_by_tokens(cols: List[str], tokens: List[str]) -> Optional[str]:
     cols_l = [str(c).lower() for c in cols]
     cols_n = [_normalize_text(c) for c in cols]
@@ -148,7 +185,12 @@ def _load_all_extractions_cached(_version: float) -> pd.DataFrame:
     for folder in course_folders:
         course_code = folder.name
         for path in sorted(folder.glob("*.xlsx")):
-            df = pd.read_excel(path, sheet_name=0, dtype=str).fillna("")
+            raw = pd.read_excel(path, sheet_name=0, header=None, dtype=str).fillna("")
+            header_idx = _detect_header_row(raw)
+            header_vals = [str(c).strip() for c in raw.iloc[header_idx].tolist()]
+            df = raw.iloc[header_idx + 1 :].copy()
+            df.columns = header_vals
+            df = df.loc[:, [c for c in df.columns if str(c).strip() != ""]]
             df.columns = [str(c).strip() for c in df.columns]
 
             c_email = find_col_by_tokens(df.columns.tolist(), COL_TOKENS["email"])
