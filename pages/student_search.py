@@ -235,39 +235,36 @@ certified_emails = load_certified_emails()
 email_for_cert_check = normalize_email(email or identity.get("email_norm", ""))
 is_certified_student = bool(email_for_cert_check and email_for_cert_check in certified_emails)
 
-latest_by_course = df.groupby("course_type")["extracted_at"].max().to_dict()
+def latest_snapshot_key_for_course(course_code: str):
+    course_df = df[df["course_type"] == course_code].copy()
+    if course_df.empty:
+        return (pd.NaT, "", False)
+    with_dt = course_df.dropna(subset=["extracted_at"])
+    if not with_dt.empty:
+        latest_dt = with_dt["extracted_at"].max()
+        latest_file = with_dt[with_dt["extracted_at"] == latest_dt]["file_name"].astype(str).max()
+        return (latest_dt, latest_file, True)
+    latest_file = course_df["file_name"].astype(str).max()
+    return (pd.NaT, latest_file, False)
 
 
-def in_latest_snapshot(course_code: str) -> bool:
-    dt = latest_by_course.get(course_code)
-    if dt is None or pd.isna(dt):
-        return False
-    return len(m[(m["course_type"] == course_code) & (m["extracted_at"] == dt)]) > 0
+latest_snapshot_keys = {code: latest_snapshot_key_for_course(code) for code in COURSE_ORDER}
 
 
-membership = {code: in_latest_snapshot(code) for code in COURSE_ORDER}
-effective_membership = dict(membership)
-if effective_membership.get(COURSE_2526_SPRING_RETAKE, False):
-    effective_membership[COURSE_2526_FALL_RETAKE] = False
-if effective_membership.get(COURSE_2526_SPRING_NEW, False):
-    effective_membership[COURSE_2526_FALL_NEW] = False
-active_course_labels = [COURSE_LABELS[c] for c in COURSE_ORDER if effective_membership[c]]
-
-verdicts_old = []
-old_dt = latest_by_course.get(COURSE_2425)
-if old_dt is not None and pd.notna(old_dt):
-    rows_old = m[(m["course_type"] == COURSE_2425) & (m["extracted_at"] == old_dt)]
-    verdicts_old = rows_old["verdict"].fillna("").tolist()
-
-passed_old = any("PASS" in str(v).upper() for v in verdicts_old if v)
-failed_old = any("FAIL" in str(v).upper() for v in verdicts_old if v)
+def student_rows_in_latest_snapshot(course_code: str) -> pd.DataFrame:
+    dt, file_name, use_dt = latest_snapshot_keys.get(course_code, (pd.NaT, "", False))
+    course_rows = m[m["course_type"] == course_code].copy()
+    if course_rows.empty or not file_name:
+        return course_rows.iloc[0:0].copy()
+    if use_dt:
+        return course_rows[
+            (course_rows["extracted_at"] == dt)
+            & (course_rows["file_name"].astype(str) == str(file_name))
+        ].copy()
+    return course_rows[course_rows["file_name"].astype(str) == str(file_name)].copy()
 
 
-def latest_verdict_for_course(course_code: str) -> str:
-    dt = latest_by_course.get(course_code)
-    if dt is None or pd.isna(dt):
-        return "Unknown"
-    rows = m[(m["course_type"] == course_code) & (m["extracted_at"] == dt)]
+def verdict_from_rows(rows: pd.DataFrame) -> str:
     if rows.empty:
         return "Unknown"
     verdicts = rows["verdict"].fillna("").astype(str).tolist()
@@ -278,7 +275,45 @@ def latest_verdict_for_course(course_code: str) -> str:
     return "Unknown"
 
 
+membership = {code: (not student_rows_in_latest_snapshot(code).empty) for code in COURSE_ORDER}
+effective_membership = dict(membership)
+if effective_membership.get(COURSE_2526_SPRING_RETAKE, False):
+    effective_membership[COURSE_2526_FALL_RETAKE] = False
+if effective_membership.get(COURSE_2526_SPRING_NEW, False):
+    effective_membership[COURSE_2526_FALL_NEW] = False
+active_course_labels = [COURSE_LABELS[c] for c in COURSE_ORDER if effective_membership[c]]
+
+
+def latest_verdict_for_course(course_code: str) -> str:
+    latest_rows = student_rows_in_latest_snapshot(course_code)
+    latest_verdict = verdict_from_rows(latest_rows)
+    if latest_verdict != "Unknown":
+        return latest_verdict
+
+    # Fallback: use the latest snapshot for this student where verdict is known.
+    course_rows = m[m["course_type"] == course_code].copy()
+    if course_rows.empty:
+        return "Unknown"
+    known_rows = course_rows[course_rows["verdict"].fillna("").astype(str).str.strip() != ""].copy()
+    if known_rows.empty:
+        return "Unknown"
+    known_with_dt = known_rows.dropna(subset=["extracted_at"])
+    if not known_with_dt.empty:
+        latest_dt = known_with_dt["extracted_at"].max()
+        latest_file = known_with_dt[known_with_dt["extracted_at"] == latest_dt]["file_name"].astype(str).max()
+        return verdict_from_rows(
+            known_with_dt[
+                (known_with_dt["extracted_at"] == latest_dt)
+                & (known_with_dt["file_name"].astype(str) == str(latest_file))
+            ]
+        )
+    latest_file = known_rows["file_name"].astype(str).max()
+    return verdict_from_rows(known_rows[known_rows["file_name"].astype(str) == str(latest_file)])
+
+
 latest_verdict_by_course = {code: latest_verdict_for_course(code) for code in COURSE_ORDER}
+passed_old = latest_verdict_by_course.get(COURSE_2425) == "Passed"
+failed_old = latest_verdict_by_course.get(COURSE_2425) == "Failed"
 completed_genai = any(v == "Passed" for v in latest_verdict_by_course.values())
 in_retake_track = membership.get(COURSE_2526_FALL_RETAKE, False) or membership.get(COURSE_2526_SPRING_RETAKE, False)
 failed_new_students_track = (
@@ -286,9 +321,11 @@ failed_new_students_track = (
     or latest_verdict_by_course.get(COURSE_2526_SPRING_NEW) == "Failed"
 )
 only_failed_new_students = failed_new_students_track and not in_retake_track
-retake_not_completed = (
-    (membership.get(COURSE_2526_FALL_RETAKE, False) and latest_verdict_by_course.get(COURSE_2526_FALL_RETAKE) != "Passed")
-    or (membership.get(COURSE_2526_SPRING_RETAKE, False) and latest_verdict_by_course.get(COURSE_2526_SPRING_RETAKE) != "Passed")
+spring_retake_in_progress = membership.get(COURSE_2526_SPRING_RETAKE, False) and (
+    latest_verdict_by_course.get(COURSE_2526_SPRING_RETAKE) != "Passed"
+)
+fall_retake_in_progress = membership.get(COURSE_2526_FALL_RETAKE, False) and (
+    latest_verdict_by_course.get(COURSE_2526_FALL_RETAKE) != "Passed"
 )
 is_poc_student = m["course_type"].astype(str).str.strip().str.lower().eq(COURSE_POC.lower()).any()
 
@@ -296,10 +333,12 @@ if is_poc_student:
     st.success("poc_student")
 elif completed_genai:
     st.success("Completed the GenAI course")
-elif retake_not_completed:
-    st.error("Failed to complete the GenAI course in retake. Student cannot redo it again.")
+elif spring_retake_in_progress:
+    st.warning("In progress: Spring 2526 retake")
+elif fall_retake_in_progress:
+    st.warning("In progress: Fall 2526 retake")
 elif only_failed_new_students:
-    st.info("In progress: failed the new students course and currently not enrolled in another track.")
+    st.warning("In progress: failed the new students course and currently not enrolled in another track.")
 
 conflicts = []
 if membership[COURSE_2526_FALL_NEW] and membership[COURSE_2526_FALL_RETAKE]:
@@ -312,7 +351,9 @@ if (membership[COURSE_2526_FALL_NEW] or membership[COURSE_2526_SPRING_NEW]) and 
     conflicts.append(f"In new students track but failed {COURSE_LABELS[COURSE_2425]}")
 
 situation = "Needs review"
-if passed_old:
+if completed_genai:
+    situation = "Passed (GenAI course)"
+elif passed_old:
     situation = f"Passed ({COURSE_LABELS[COURSE_2425]})"
 elif failed_old:
     situation = f"Retake required ({COURSE_LABELS[COURSE_2526_SPRING_RETAKE]})"
