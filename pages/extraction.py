@@ -183,12 +183,14 @@ def process_uploaded_files(seji_file, hours_file, output_name, seji_sheet):
         exclude = exclude or set()
         keys = [norm_key(k) for k in df_cols]
         kws = [norm_key(kw) for kw in keywords]
+        compact_kws = [re.sub(r"[^a-z0-9]+", "", kw) for kw in kws]
         for idx, k in enumerate(keys):
             col = df_cols[idx]
             if col in exclude:
                 continue
             tok = set(_tokens(k))
-            if all(kw in tok for kw in kws):
+            compact_k = re.sub(r"[^a-z0-9]+", "", k)
+            if all((kw in tok) or (ckw and ckw in compact_k) for kw, ckw in zip(kws, compact_kws)):
                 return col
         return None
 

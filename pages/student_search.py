@@ -246,7 +246,12 @@ def in_latest_snapshot(course_code: str) -> bool:
 
 
 membership = {code: in_latest_snapshot(code) for code in COURSE_ORDER}
-active_course_labels = [COURSE_LABELS[c] for c in COURSE_ORDER if membership[c]]
+effective_membership = dict(membership)
+if effective_membership.get(COURSE_2526_SPRING_RETAKE, False):
+    effective_membership[COURSE_2526_FALL_RETAKE] = False
+if effective_membership.get(COURSE_2526_SPRING_NEW, False):
+    effective_membership[COURSE_2526_FALL_NEW] = False
+active_course_labels = [COURSE_LABELS[c] for c in COURSE_ORDER if effective_membership[c]]
 
 verdicts_old = []
 old_dt = latest_by_course.get(COURSE_2425)
@@ -324,9 +329,9 @@ elif membership[COURSE_2425]:
 if conflicts:
     situation = "Needs review"
 
-left, right = st.columns([1.05, 1.95], gap="large")
+head_l, head_c, head_r = st.columns([0.25, 1.05, 1.05], gap="large")
 
-with left:
+with head_c:
     student_id_display = identity.get("student_id", "")
     student_id_with_e = normalize_student_id_e(student_id_display)
     student_id_label = student_id_with_e if student_id_with_e else "-"
@@ -346,132 +351,132 @@ with left:
         """,
     )
 
-    divider()
-
+with head_r:
     enrollment_text = " | ".join(active_course_labels) if active_course_labels else "No course found in latest snapshots"
     card("Current enrollment", f"<div><b>{enrollment_text}</b></div>")
     card("Latest situation", f"<div><b>{situation}</b></div>")
     if conflicts:
         card("Needs review", f"<div class='small-muted'>{' | '.join(conflicts)}</div>", muted=True)
 
-with right:
-    cols = st.columns(len(COURSE_ORDER), gap="large")
-    for idx, course_code in enumerate(COURSE_ORDER):
-        with cols[idx]:
-            verdict = latest_verdict_by_course[course_code]
-            chip_class = (
-                "verdict-pass"
-                if verdict == "Passed"
-                else "verdict-fail"
-                if verdict == "Failed"
-                else "verdict-unknown"
-            )
-            card(
-                COURSE_LABELS[course_code],
-                (
-                    f"<div class='small-muted'>"
-                    f"{'In latest extraction' if membership[course_code] else 'Not in latest extraction'}"
-                    f"</div><br><div><span class='verdict-chip {chip_class}'>Latest verdict: {verdict}</span></div>"
-                ),
-            )
+divider()
 
-    divider()
+course_cols = st.columns(len(COURSE_ORDER), gap="large")
+for idx, course_code in enumerate(COURSE_ORDER):
+    with course_cols[idx]:
+        verdict = latest_verdict_by_course[course_code]
+        chip_class = (
+            "verdict-pass"
+            if verdict == "Passed"
+            else "verdict-fail"
+            if verdict == "Failed"
+            else "verdict-unknown"
+        )
+        card(
+            COURSE_LABELS[course_code],
+            (
+                f"<div class='small-muted'>"
+                f"{'In latest extraction' if membership[course_code] else 'Not in latest extraction'}"
+                f"</div><br><div><span class='verdict-chip {chip_class}'>Latest verdict: {verdict}</span></div>"
+            ),
+        )
 
-    if "student_scope" not in st.session_state:
-        st.session_state["student_scope"] = "Generalized analytics"
+divider()
 
-    scope_options = ["Generalized analytics"] + [COURSE_LABELS[c] for c in COURSE_ORDER]
+if "student_scope" not in st.session_state:
+    st.session_state["student_scope"] = "Generalized analytics"
 
-    current_scope = st.radio(
-        "Analytics scope",
-        options=scope_options,
-        index=scope_options.index(st.session_state["student_scope"]) if st.session_state["student_scope"] in scope_options else 0,
-        horizontal=True,
+scope_options = ["Generalized analytics"] + [COURSE_LABELS[c] for c in COURSE_ORDER]
+
+current_scope = st.radio(
+    "Analytics scope",
+    options=scope_options,
+    index=scope_options.index(st.session_state["student_scope"]) if st.session_state["student_scope"] in scope_options else 0,
+    horizontal=True,
+)
+st.session_state["student_scope"] = current_scope
+
+if st.button("Generalize analytics"):
+    st.session_state["student_scope"] = "Generalized analytics"
+    st.rerun()
+
+card(
+    "Student analytics",
+    "<div class='small-muted'>Charts below update based on selected scope.</div>",
+    muted=True,
+)
+
+timeline = m.dropna(subset=["extracted_at"]).sort_values("extracted_at").copy()
+
+selected_course_code = None
+for code, label in COURSE_LABELS.items():
+    if st.session_state["student_scope"] == label:
+        selected_course_code = code
+        break
+
+if selected_course_code:
+    timeline = timeline[timeline["course_type"] == selected_course_code].copy()
+
+if timeline.empty:
+    st.info("No timeline data available for the selected scope.")
+    st.stop()
+
+def to_float(x):
+    try:
+        return float(str(x).replace(",", "."))
+    except Exception:
+        return None
+
+timeline["hours_num"] = timeline["hours"].map(to_float)
+timeline["grade_num"] = timeline["grade"].map(to_float)
+
+st.markdown("<div class='chart-title'>Presence Over Time</div>", unsafe_allow_html=True)
+if selected_course_code:
+    presence_ts = timeline.groupby("extracted_at").size().sort_index()
+    st.line_chart(presence_ts)
+else:
+    presence_ts = (
+        timeline.groupby(["extracted_at", "course_type"])
+        .size()
+        .reset_index(name="present")
+        .pivot(index="extracted_at", columns="course_type", values="present")
+        .fillna(0)
+        .sort_index()
     )
-    st.session_state["student_scope"] = current_scope
+    presence_ts = presence_ts.rename(columns=COURSE_LABELS)
+    st.line_chart(presence_ts)
 
-    if st.button("Generalize analytics"):
-        st.session_state["student_scope"] = "Generalized analytics"
-        st.rerun()
-
-    card(
-        "Student analytics",
-        "<div class='small-muted'>Charts below update based on selected scope.</div>",
-        muted=True,
+st.markdown("<div class='chart-title'>Hours Over Time</div>", unsafe_allow_html=True)
+if selected_course_code:
+    hours_ts = timeline.groupby("extracted_at")["hours_num"].max().sort_index()
+    st.line_chart(hours_ts)
+else:
+    hours_ts = (
+        timeline.groupby(["extracted_at", "course_type"])["hours_num"]
+        .max()
+        .reset_index()
+        .pivot(index="extracted_at", columns="course_type", values="hours_num")
+        .sort_index()
     )
+    hours_ts = hours_ts.rename(columns=COURSE_LABELS)
+    st.line_chart(hours_ts)
 
-    timeline = m.dropna(subset=["extracted_at"]).sort_values("extracted_at").copy()
+st.markdown("<div class='chart-title'>Grade Over Time</div>", unsafe_allow_html=True)
+if selected_course_code:
+    grade_ts = timeline.groupby("extracted_at")["grade_num"].max().sort_index()
+    st.line_chart(grade_ts)
+else:
+    grade_ts = (
+        timeline.groupby(["extracted_at", "course_type"])["grade_num"]
+        .max()
+        .reset_index()
+        .pivot(index="extracted_at", columns="course_type", values="grade_num")
+        .sort_index()
+    )
+    grade_ts = grade_ts.rename(columns=COURSE_LABELS)
+    st.line_chart(grade_ts)
 
-    selected_course_code = None
-    for code, label in COURSE_LABELS.items():
-        if st.session_state["student_scope"] == label:
-            selected_course_code = code
-            break
-
-    if selected_course_code:
-        timeline = timeline[timeline["course_type"] == selected_course_code].copy()
-
-    if timeline.empty:
-        st.info("No timeline data available for the selected scope.")
-        st.stop()
-
-    def to_float(x):
-        try:
-            return float(str(x).replace(",", "."))
-        except Exception:
-            return None
-
-    timeline["hours_num"] = timeline["hours"].map(to_float)
-    timeline["grade_num"] = timeline["grade"].map(to_float)
-
-    st.markdown("<div class='chart-title'>Presence Over Time</div>", unsafe_allow_html=True)
-    if selected_course_code:
-        presence_ts = timeline.groupby("extracted_at").size().sort_index()
-        st.line_chart(presence_ts)
-    else:
-        presence_ts = (
-            timeline.groupby(["extracted_at", "course_type"])
-            .size()
-            .reset_index(name="present")
-            .pivot(index="extracted_at", columns="course_type", values="present")
-            .fillna(0)
-            .sort_index()
-        )
-        presence_ts = presence_ts.rename(columns=COURSE_LABELS)
-        st.line_chart(presence_ts)
-
-    st.markdown("<div class='chart-title'>Hours Over Time</div>", unsafe_allow_html=True)
-    if selected_course_code:
-        hours_ts = timeline.groupby("extracted_at")["hours_num"].max().sort_index()
-        st.line_chart(hours_ts)
-    else:
-        hours_ts = (
-            timeline.groupby(["extracted_at", "course_type"])["hours_num"]
-            .max()
-            .reset_index()
-            .pivot(index="extracted_at", columns="course_type", values="hours_num")
-            .sort_index()
-        )
-        hours_ts = hours_ts.rename(columns=COURSE_LABELS)
-        st.line_chart(hours_ts)
-
-    st.markdown("<div class='chart-title'>Grade Over Time</div>", unsafe_allow_html=True)
-    if selected_course_code:
-        grade_ts = timeline.groupby("extracted_at")["grade_num"].max().sort_index()
-        st.line_chart(grade_ts)
-    else:
-        grade_ts = (
-            timeline.groupby(["extracted_at", "course_type"])["grade_num"]
-            .max()
-            .reset_index()
-            .pivot(index="extracted_at", columns="course_type", values="grade_num")
-            .sort_index()
-        )
-        grade_ts = grade_ts.rename(columns=COURSE_LABELS)
-        st.line_chart(grade_ts)
-
-    with st.expander("Matched rows (selected scope)"):
-        show_cols = ["extracted_at", "course_type", "hours", "grade", "verdict", "file_name"]
-        table = timeline[show_cols].sort_values("extracted_at").copy()
-        table["course_type"] = table["course_type"].map(lambda c: COURSE_LABELS.get(c, c))
-        st.dataframe(table, use_container_width=True)
+with st.expander("Matched rows (selected scope)"):
+    show_cols = ["extracted_at", "course_type", "hours", "grade", "verdict", "file_name"]
+    table = timeline[show_cols].sort_values("extracted_at").copy()
+    table["course_type"] = table["course_type"].map(lambda c: COURSE_LABELS.get(c, c))
+    st.dataframe(table, use_container_width=True)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+import unicodedata
 from pathlib import Path
 from typing import Optional, List
 
@@ -12,11 +13,11 @@ CERTIFIED_STUDENTS_PATH = Path("data/Student_Data/Certified_Students.xlsx")
 
 COL_TOKENS = {
     "email": ["email"],
-    "student_id": ["student id", "id"],
+    "student_id": ["student id", "studentid", "id etudiant", "idetudiant", "id"],
     "first_name": ["first name", "prénom", "prenom"],
     "last_name": ["last name", "nom"],
-    "hours": ["hours in course", "hours", "heures"],
-    "grade": ["overall grade", "overall grade ["],
+    "hours": ["hours in course", "hoursincourse", "hours", "time spent", "temps passe", "heures"],
+    "grade": ["overall grade", "overallgrade", "final grade", "grade finale", "grade"],
     "verdict": ["verdict", "outcome", "result", "pass", "fail"],
 }
 
@@ -37,10 +38,24 @@ def first_email_in_row(row: pd.Series) -> str:
             return e
     return ""
 
+def _normalize_text(s: str) -> str:
+    raw = str(s or "").strip().lower()
+    raw = unicodedata.normalize("NFKD", raw)
+    no_accents = "".join(ch for ch in raw if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", no_accents)
+
 def find_col_by_tokens(cols: List[str], tokens: List[str]) -> Optional[str]:
-    cols_l = [c.lower() for c in cols]
+    cols_l = [str(c).lower() for c in cols]
+    cols_n = [_normalize_text(c) for c in cols]
+    tokens_n = [_normalize_text(t) for t in tokens]
     for t in tokens:
         for i, c in enumerate(cols_l):
+            if t in c:
+                return cols[i]
+    for t in tokens_n:
+        if not t:
+            continue
+        for i, c in enumerate(cols_n):
             if t in c:
                 return cols[i]
     return None
