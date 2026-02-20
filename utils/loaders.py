@@ -320,7 +320,9 @@ def _load_certified_students_cached(_version: float) -> list[str]:
 
     c_email = find_col_by_tokens(df.columns.tolist(), ["email", "mail"])
     if c_email:
-        emails = df[c_email].map(normalize_email)
+        primary_emails = df[c_email].map(normalize_email)
+        fallback_emails = df.apply(first_email_in_row, axis=1)
+        emails = primary_emails.where(primary_emails != "", fallback_emails)
     else:
         emails = df.apply(first_email_in_row, axis=1)
 
